@@ -53,6 +53,11 @@ label.f{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:60
 .bar select{flex:0 1 220px;width:auto}
 .chk{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;white-space:nowrap}
 .chk input{width:18px;height:18px;min-height:0}
+.live{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap;margin-left:auto}
+.live b{color:var(--ink)}
+.live i{width:8px;height:8px;border-radius:50%;background:#22A35A;box-shadow:0 0 0 3px rgb(34 163 90 / .18);animation:pl 2s ease-in-out infinite}
+@keyframes pl{50%{box-shadow:0 0 0 6px rgb(34 163 90 / .06)}}
+@media (prefers-reduced-motion:reduce){.live i{animation:none}}
 .head{padding:18px 0 6px}
 .head h1{font:700 clamp(20px,3vw,28px)/1.15 var(--f-d);margin:0}
 .head p{margin:6px 0 0;color:var(--muted);font-size:14px}
@@ -215,12 +220,12 @@ function main(){cartLoad();const m=S.meta;document.title=(m.shop?m.shop+' — ':
    <div class="bar"><div class="wrap"><input class="q" id="q" type="search" placeholder="Поиск: название, модель…" value="${esc(S.q)}" autocomplete="off">
     <select id="g" aria-label="Группа"><option value="">Все группы (${S.rows.length})</option>${groups.map(g=>`<option${g===S.g?' selected':''}>${esc(g)}</option>`).join('')}</select>
     <select id="srt" aria-label="Порядок"><option value="price"${S.sort==='price'?' selected':''}>Сначала дешевле</option><option value="desc"${S.sort==='desc'?' selected':''}>Сначала дороже</option><option value="name"${S.sort==='name'?' selected':''}>По названию</option></select>
-    ${m.st?`<label class="chk"><input type="checkbox" id="only"${S.only?' checked':''}> Только в наличии</label>`:''}</div></div>
+    ${m.st?`<label class="chk"><input type="checkbox" id="only"${S.only?' checked':''}> Только в наличии</label>`:''}<span class="live" id="live" hidden><i aria-hidden="true"></i>Сейчас смотрят: <b id="liveN">1</b></span></div></div>
    <main class="wrap"><div class="head"><h1>${esc(m.title||'Прайс-лист')}</h1><p>${(m.contact||[]).map(esc).join(' · ')}</p>${m.note?`<div class="note">${esc(m.note)}</div>`:''}</div>
     <div id="list">${listHtml()}</div>
     <div class="foot">Цены в сомах.${m.st?' «В наличии» — 5 шт и более, при меньшем остатке указано точное количество.':''} Заказ из корзины приходит нам сразу, мы свяжемся для подтверждения.</div></main>
    <button class="btn acc fab" id="fab" data-cart="1" hidden>Корзина · <span data-cartsum></span></button>`;
-  updCart();lazy();
+  updCart();lazy();online();
   $('#q').addEventListener('input',e=>{S.q=e.target.value;relist()});
   $('#g').addEventListener('change',e=>{S.g=e.target.value;relist();window.scrollTo({top:0})});
   $('#srt').addEventListener('change',e=>{S.sort=e.target.value;relist()});
@@ -230,6 +235,14 @@ function fmtDt(iso){if(!iso)return '—';const d=new Date(iso);return d.toLocale
 let io=null;function lazy(){if(!('IntersectionObserver' in window)){document.querySelectorAll('img[data-th]').forEach(loadTh);return}
   io?.disconnect();io=new IntersectionObserver(es=>{for(const e of es)if(e.isIntersecting){io.unobserve(e.target);loadTh(e.target)}},{rootMargin:'300px'});document.querySelectorAll('img[data-th]:not([src])').forEach(i=>io.observe(i))}
 async function loadTh(img){const id=img.dataset.th;if(S.th[id]){img.src=S.th[id];return}try{const d=await db.doc('optthumb/'+id).get();if(d.exists&&d.data().t){S.th[id]=d.data().t;document.querySelectorAll(`img[data-th="${CSS.escape(id)}"]`).forEach(x=>x.src=S.th[id])}}catch(e){}}
+
+/* ---------- «сейчас смотрят»: отметка раз в минуту, считаем тех, кто отмечался за 2 минуты ---------- */
+let onT=null;function online(){if(onT)return;let id=LS.get('opt_vid',null);if(!id){id=Math.random().toString(36).slice(2)+Date.now().toString(36);LS.set('opt_vid',id)}
+  const FV=firebase.firestore.FieldValue,TS=firebase.firestore.Timestamp;
+  const ping=()=>{if(document.visibilityState==='hidden'||!S.key)return;try{db.doc('optonline/'+id).set({t:FV.serverTimestamp()}).catch(()=>{})}catch(e){}};
+  const count=()=>{try{db.collection('optonline').where('t','>',TS.fromMillis(Date.now()-120000)).get().then(sn=>{const n=Math.max(1,sn.size);const b=$('#liveN'),l=$('#live');if(b&&l){b.textContent=n;l.hidden=false}}).catch(()=>{})}catch(e){}};
+  ping();setTimeout(count,1500);onT=setInterval(()=>{ping();setTimeout(count,1500)},60000);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){ping();setTimeout(count,1500)}})}
 
 /* ---------- карточка товара ---------- */
 async function openItem(pid){const r=S.rows.find(x=>String(x.i)===String(pid));if(!r)return;S.open={r,imgs:[],desc:'',k:0,loading:true};modal();
