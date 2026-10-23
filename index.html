@@ -59,6 +59,9 @@ label.f{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:60
 @keyframes pl{50%{box-shadow:0 0 0 6px rgb(34 163 90 / .06)}}
 @media (prefers-reduced-motion:reduce){.live i{animation:none}}
 .head{padding:18px 0 6px}
+.hrow{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.dl{display:flex;gap:8px}
+.dl .btn{background:#fff}
 .head h1{font:700 clamp(20px,3vw,28px)/1.15 var(--f-d);margin:0}
 .head p{margin:6px 0 0;color:var(--muted);font-size:14px}
 .head .note{margin-top:8px;padding:8px 12px;border-radius:10px;background:var(--lowbg);color:#6B3A00;font-weight:600;font-size:14px;display:inline-block}
@@ -221,7 +224,7 @@ function main(){cartLoad();const m=S.meta;document.title=(m.shop?m.shop+' — ':
     <select id="g" aria-label="Группа"><option value="">Все группы (${S.rows.length})</option>${groups.map(g=>`<option${g===S.g?' selected':''}>${esc(g)}</option>`).join('')}</select>
     <select id="srt" aria-label="Порядок"><option value="price"${S.sort==='price'?' selected':''}>Сначала дешевле</option><option value="desc"${S.sort==='desc'?' selected':''}>Сначала дороже</option><option value="name"${S.sort==='name'?' selected':''}>По названию</option></select>
     ${m.st?`<label class="chk"><input type="checkbox" id="only"${S.only?' checked':''}> Только в наличии</label>`:''}<span class="live" id="live" hidden><i aria-hidden="true"></i>Сейчас смотрят: <b id="liveN">1</b></span></div></div>
-   <main class="wrap"><div class="head"><h1>${esc(m.title||'Прайс-лист')}</h1><p>${(m.contact||[]).map(esc).join(' · ')}</p>${m.note?`<div class="note">${esc(m.note)}</div>`:''}</div>
+   <main class="wrap"><div class="head"><div class="hrow"><h1>${esc(m.title||'Прайс-лист')}</h1><div class="dl"><button class="btn sm line" data-dl="pdf">Скачать PDF</button><button class="btn sm line" data-dl="xlsx">Скачать Excel</button></div></div><p>${(m.contact||[]).map(esc).join(' · ')}</p>${m.note?`<div class="note">${esc(m.note)}</div>`:''}</div>
     <div id="list">${listHtml()}</div>
     <div class="foot">Цены в сомах.${m.st?' «В наличии» — 5 шт и более, при меньшем остатке указано точное количество.':''} Заказ из корзины приходит нам сразу, мы свяжемся для подтверждения.</div></main>
    <button class="btn acc fab" id="fab" data-cart="1" hidden>Корзина · <span data-cartsum></span></button>`;
@@ -285,7 +288,132 @@ async function sendOrder(e){e.preventDefault();const name=$('#on').value.trim(),
     S.sent={no,total,text};S.cart=[];cartSave();updCart();drawer()}
   catch(ex){b.disabled=false;b.textContent='Отправить заказ';err.textContent='Не удалось отправить. Проверьте интернет и попробуйте ещё раз'}}
 
+/* ---------- прайс-лист PDF / Excel — тот же вид, что в программе ---------- */
+const NF0=new Intl.NumberFormat('ru-RU',{maximumFractionDigits:0});
+const CRCT=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRCT[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
+function zipStore(files){const enc=new TextEncoder();const chunks=[],cen=[];let off=0;
+  for(const [name,str] of files){const nb=enc.encode(name),db=enc.encode(str),crc=crc32(db);
+    const h=new DataView(new ArrayBuffer(30));h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(8,0,true);h.setUint16(10,0,true);h.setUint16(12,0x21,true);h.setUint32(14,crc,true);h.setUint32(18,db.length,true);h.setUint32(22,db.length,true);h.setUint16(26,nb.length,true);h.setUint16(28,0,true);
+    chunks.push(new Uint8Array(h.buffer),nb,db);
+    const c=new DataView(new ArrayBuffer(46));c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(8,0x0800,true);c.setUint16(10,0,true);c.setUint16(12,0,true);c.setUint16(14,0x21,true);c.setUint32(16,crc,true);c.setUint32(20,db.length,true);c.setUint32(24,db.length,true);c.setUint16(28,nb.length,true);c.setUint32(42,off,true);
+    cen.push(new Uint8Array(c.buffer),nb);off+=30+nb.length+db.length}
+  const cs=cen.reduce((a,b)=>a+b.length,0);const e=new DataView(new ArrayBuffer(22));e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,cs,true);e.setUint32(16,off,true);
+  const all=[...chunks,...cen,new Uint8Array(e.buffer)];const out=new Uint8Array(all.reduce((a,b)=>a+b.length,0));let p=0;for(const b of all){out.set(b,p);p+=b.length}return out}
+function capPages(fn){const P=CanvasRenderingContext2D.prototype;const orig=P.fillText;
+  P.fillText=function(t,x,y){try{const s=String(t??'');if(s.trim()){const m=this.getTransform();const a=m.a;const fs=(parseFloat((this.font.match(/([\d.]+)px/)||[])[1])||12)*a;let w=this.measureText(s).width*a;let X=a*x+m.e;const Y=m.d*y+m.f;
+      if(this.textAlign==='right'||this.textAlign==='end')X-=w;else if(this.textAlign==='center')X-=w/2;(this.canvas._txt??=[]).push({s,x:X,y:Y,fs,w,base:this.textBaseline})}}catch(e){}return orig.apply(this,arguments)};
+  try{return fn()}finally{P.fillText=orig}}
+const jpegOf=(c,q)=>{const b=atob(c.toDataURL('image/jpeg',q||0.9).split(',')[1]);const a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return{w:c.width,h:c.height,data:a,txt:c._txt||[]}};
+function pdfFromJpegs(imgs){const enc=new TextEncoder();const parts=[];let len=0;const off=[];
+  const put=b=>{if(typeof b==='string')b=enc.encode(b);parts.push(b);len+=b.length};
+  const obj=(n,body)=>{off[n]=len;put(`${n} 0 obj\n`);for(const b of body)put(b);put('\nendobj\n')};
+  put('%PDF-1.4\n%AAAA\n');
+  const n=imgs.length,W=595.28,H=841.89,F0=7;const kids=imgs.map((_,i)=>`${F0+i*3} 0 R`).join(' ');
+  obj(1,['<< /Type /Catalog /Pages 2 0 R >>']);obj(2,[`<< /Type /Pages /Kids [${kids}] /Count ${n} >>`]);
+  obj(3,['<< /Type /Font /Subtype /Type0 /BaseFont /ArialMT /Encoding /Identity-H /DescendantFonts [4 0 R] /ToUnicode 6 0 R >>']);
+  obj(4,['<< /Type /Font /Subtype /CIDFontType2 /BaseFont /ArialMT /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 5 0 R /DW 500 /CIDToGIDMap /Identity >>']);
+  obj(5,['<< /Type /FontDescriptor /FontName /ArialMT /Flags 32 /FontBBox [-200 -250 1200 950] /ItalicAngle 0 /Ascent 905 /Descent -212 /CapHeight 716 /StemV 80 >>']);
+  {let rs=[];for(let h=0;h<256;h++){if(h>=0xD8&&h<=0xDF)continue;const x=h.toString(16).padStart(2,'0').toUpperCase();rs.push(`<${x}00> <${x}FF> <${x}00>`)}let body='';for(let i=0;i<rs.length;i+=100){const c=rs.slice(i,i+100);body+=`${c.length} beginbfrange\n${c.join('\n')}\nendbfrange\n`}
+   const cm=`/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n${body}endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend`;obj(6,[`<< /Length ${enc.encode(cm).length} >>\nstream\n${cm}\nendstream`])}
+  const f=v=>(Math.round(v*100)/100).toString();
+  imgs.forEach((im,i)=>{const p=F0+i*3;const sx=W/im.w,sy=H/im.h;let tx='';
+    for(const t of im.txt||[]){const fs=t.fs*sy;if(fs<=0)continue;const hex=[...t.s].map(ch=>{const c=ch.codePointAt(0);return c>0xFFFF?'003F':c.toString(16).padStart(4,'0').toUpperCase()}).join('');const nc=hex.length/4;
+      const base=t.base==='top'?t.y+t.fs*0.82:t.y;const X=t.x*sx,Y=H-base*sy;const tz=nc?Math.max(1,Math.min(1000,100*(t.w*sx)/(nc*0.5*fs))):100;
+      tx+=`BT 3 Tr /F1 ${f(fs)} Tf ${f(tz)} Tz 1 0 0 1 ${f(X)} ${f(Y)} Tm <${hex}> Tj ET\n`}
+    const cs=`q ${W} 0 0 ${H} 0 0 cm /Im0 Do Q\n${tx}`;const csb=enc.encode(cs);
+    obj(p,[`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /XObject << /Im0 ${p+2} 0 R >> /Font << /F1 3 0 R >> >> /Contents ${p+1} 0 R >>`]);
+    obj(p+1,[`<< /Length ${csb.length} >>\nstream\n`,csb,'\nendstream']);
+    obj(p+2,[`<< /Type /XObject /Subtype /Image /Width ${im.w} /Height ${im.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${im.data.length} >>\nstream\n`,im.data,'\nendstream'])});
+  const total=F0+n*3;const xo=len;let xr=`xref\n0 ${total}\n0000000000 65535 f \n`;for(let i=1;i<total;i++)xr+=String(off[i]).padStart(10,'0')+' 00000 n \n';
+  put(xr+`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xo}\n%%EOF`);
+  const out=new Uint8Array(len);let p=0;for(const b of parts){out.set(b,p);p+=b.length}return out}
+const PLC={band:'#1E3A5F',band2:'#2B5A8A',head:'#16263B',zebra:'#F2F6FB',line:'#D5DEE8',ok:'#1E7A46',low:'#B4600B',muted:'#6B7785'};
+function plPages(d){const K=200/150,PW=1240,PH=1754,M=48,CW=PW-2*M,F='Arial, "Helvetica Neue", Helvetica, sans-serif';const pages=[];let c,x,y;
+  const font=(sz,b)=>{x.font=`${b?'bold ':''}${sz}px ${F}`};
+  const wrap=(t,w)=>{const out=[];let line='';for(const word of String(t??'').split(/\s+/)){if(!word)continue;const cand=line?line+' '+word:word;if(x.measureText(cand).width<=w){line=cand;continue}if(line)out.push(line);let wd=word;while(x.measureText(wd).width>w){let k=wd.length;while(k>1&&x.measureText(wd.slice(0,k)).width>w)k--;out.push(wd.slice(0,k));wd=wd.slice(k)}line=wd}out.push(line);return out};
+  const cols=[['№',.06,'c'],['Наименование',.48,'l'],...(d.anyNote?[['Примечание',.2,'l']]:[]),...(d.war?[['Гарантия',.11,'c']]:[]),...(d.st?[['Наличие',.12,'c']]:[]),['Цена, сом',.15,'r']];{const t=cols.reduce((a,x)=>a+x[1],0);cols.forEach(x=>x[1]=x[1]/t)}const cw=cols.map(t=>t[1]*CW);const P=10;
+  const put=(t,i,cx,yy)=>{const a=cols[i][2];if(a==='r'){x.textAlign='right';x.fillText(t,cx+cw[i]-P,yy)}else if(a==='c'){x.textAlign='center';x.fillText(t,cx+cw[i]/2,yy)}else x.fillText(t,cx+P,yy);x.textAlign='left'};
+  const page=()=>{c=document.createElement('canvas');c.width=Math.round(PW*K);c.height=Math.round(PH*K);x=c.getContext('2d');x.scale(K,K);x.fillStyle='#fff';x.fillRect(0,0,PW,PH);x.textBaseline='top';pages.push(c);
+    font(15,false);x.fillStyle=PLC.muted;x.textAlign='right';x.fillText(`${d.shop?d.shop+' · ':''}${d.title} · ${d.date} · стр. ${pages.length}`,PW-M,PH-M+14);x.textAlign='left';y=M};
+  const hdr=()=>{const h=34;x.fillStyle=PLC.head;x.fillRect(M,y,CW,h);font(17,true);x.fillStyle='#fff';let cx=M;cols.forEach((t,i)=>{put(t[0],i,cx,y+8);cx+=cw[i]});y+=h};
+  page();
+  // шапка
+  const bh=56+21*d.contact.length;x.fillStyle=PLC.band;x.fillRect(0,0,PW,bh+M-26);x.fillStyle=PLC.band2;x.fillRect(0,bh+M-26,PW,5);
+  font(32,true);x.fillStyle='#fff';x.fillText(d.shop||d.title,M,M-14);font(16,false);x.fillStyle='#CFE0F2';d.contact.forEach((l,k)=>x.fillText(l,M,M+26+k*21));
+  font(18,true);x.textAlign='right';x.fillStyle='#fff';x.fillText(d.date,PW-M,M-10);x.textAlign='left';y=bh+M-6;
+  font(26,true);x.fillStyle=PLC.head;for(const l of wrap(d.title.toUpperCase(),CW)){x.fillText(l,M,y);y+=34}
+  if(d.note){y+=2;font(19,true);const NL=wrap(d.note,CW-60);const nh=NL.length*25+16;x.fillStyle='#FFF1CC';x.fillRect(M,y,CW,nh);x.fillStyle='#E08A00';x.fillRect(M,y,8,nh);
+    x.fillStyle='#E08A00';font(21,true);x.fillText('!',M+22,y+8);font(19,true);x.fillStyle='#5A3A00';NL.forEach((l,k)=>x.fillText(l,M+44,y+9+k*25));y+=nh+4}y+=8;
+  hdr();
+  if(d.kits.length){const KC='#B4600B';font(19,true);const gh=34;x.fillStyle=KC;x.fillRect(M,y,CW,gh);x.fillStyle='#fff';x.fillRect(M,y,5,gh);x.fillText('КОМПЛЕКТЫ',M+P+8,y+8);font(15,false);x.fillStyle='#FFE9CC';x.textAlign='right';x.fillText(`${d.kits.length} шт.`,PW-M-P,y+10);x.textAlign='left';y+=gh;
+    const pi=cols.length-1;const ci=cols.findIndex(t=>t[0]==='Наличие');
+    d.kits.forEach((k,j)=>{font(21,true);const nm=wrap(k.name,cw[1]+(d.anyNote?cw[2]:0)-2*P);font(18,false);const cl=k.comps.flatMap(t=>wrap('• '+t,cw[1]+(d.anyNote?cw[2]:0)-2*P-10));font(18,true);const kn=k.note?wrap(k.note,cw[1]+(d.anyNote?cw[2]:0)-2*P-10):[];const h=Math.max(nm.length*25+cl.length*22+kn.length*23+(kn.length?4:0),k.sep>k.price?66:30)+12;
+      if(y+h>PH-M-30){page();hdr()}
+      x.fillStyle='#FFF6EA';x.fillRect(M,y,CW,h);x.fillStyle=KC;x.fillRect(M,y,5,h);x.strokeStyle=PLC.line;x.lineWidth=1;x.beginPath();x.moveTo(M,y+h);x.lineTo(M+CW,y+h);x.stroke();
+      let cx=M;for(let i=0;i<cols.length;i++){if(i===0){font(13,true);x.fillStyle=KC;put('К'+(j+1),0,cx,y+7)}
+        if(i===1){font(21,true);x.fillStyle='#111';nm.forEach((l,n)=>x.fillText(l,cx+P,y+6+n*25));font(18,false);x.fillStyle='#4A4A4A';cl.forEach((l,n)=>x.fillText(l,cx+P+10,y+8+nm.length*25+n*22));if(kn.length){font(18,true);x.fillStyle=KC;kn.forEach((l,n)=>x.fillText(l,cx+P+10,y+12+nm.length*25+cl.length*22+n*23))}}
+        if(i===ci){font(18,true);x.fillStyle=k.q<=0?PLC.muted:k.q<5?PLC.low:PLC.ok;put(k.stock,i,cx,y+7)}
+        if(i===pi){font(22,true);x.fillStyle=KC;put(NF0.format(Math.round(k.price)),i,cx,y+6);if(k.sep>k.price){font(16,false);x.fillStyle=PLC.muted;const t=NF0.format(Math.round(k.sep));put(t,i,cx,y+33);const tw=x.measureText(t).width;x.strokeStyle=PLC.muted;x.lineWidth=1.4;x.beginPath();x.moveTo(cx+cw[i]-P-tw,y+42);x.lineTo(cx+cw[i]-P,y+42);x.stroke();font(15,true);x.fillStyle=PLC.ok;put('выгода '+NF0.format(Math.round(k.sep-k.price)),i,cx,y+54)}}
+        cx+=cw[i]}y+=h});y+=6}
+  for(const g of d.groups){font(19,true);const gh=34;if(y+gh+40>PH-M-30){page();hdr()}
+    x.fillStyle=PLC.band2;x.fillRect(M,y,CW,gh);x.fillStyle='#fff';x.fillRect(M,y,5,gh);x.fillStyle='#fff';x.fillText(g.name.toUpperCase(),M+P+8,y+8);font(15,false);x.fillStyle='#DCE8F5';x.textAlign='right';x.fillText(`${g.items.length} поз.`,PW-M-P,y+10);x.textAlign='left';y+=gh;
+    g.items.forEach((it,k)=>{font(21,!!it.isNew);const nm=wrap((it.isNew?'★ ':'')+it.name,cw[1]-2*P);const ni=cols.findIndex(t=>t[0]==='Примечание');font(18,false);const nt=ni>=0&&it.note?wrap(it.note,cw[ni]-2*P):[];font(21,false);const h=Math.max(1,nm.length,Math.ceil(nt.length*22/25))*25+8;if(y+h>PH-M-30){page();hdr();font(14,true);x.fillStyle=PLC.band2;x.fillText(g.name+' (продолжение)',M+P,y+5);y+=24}
+      if(it.isNew){x.fillStyle='#E4F5EA';x.fillRect(M,y,CW,h);x.fillStyle=PLC.ok;x.fillRect(M,y,5,h)}else if(k%2){x.fillStyle=PLC.zebra;x.fillRect(M,y,CW,h)}x.strokeStyle=PLC.line;x.lineWidth=1;x.beginPath();x.moveTo(M,y+h);x.lineTo(M+CW,y+h);x.stroke();
+      let cx=M;const mid=y+(h-21)/2+1;cols.forEach((t,i)=>{const lab=t[0];
+        if(lab==='№'){font(16,false);x.fillStyle=PLC.muted;put(String(it.n),i,cx,mid+1)}
+        else if(lab==='Наименование'){font(21,!!it.isNew);x.fillStyle=it.isNew?'#0F5132':'#111';nm.forEach((l,j)=>x.fillText(l,cx+P,y+5+j*25))}
+        else if(lab==='Примечание'){font(18,false);x.fillStyle='#8A3B12';nt.forEach((l,j)=>x.fillText(l,cx+P,y+6+j*22))}
+        else if(lab==='Гарантия'){font(18,false);x.fillStyle=it.war==='—'?PLC.muted:'#333';put(it.war,i,cx,mid+1)}
+        else if(lab==='Наличие'){font(18,true);x.fillStyle=it.q<=0?PLC.muted:it.q<5?PLC.low:PLC.ok;put(it.stock,i,cx,mid+1)}
+        else{font(21,true);x.fillStyle=PLC.head;put(NF0.format(Math.round(it.price)),i,cx,mid)}cx+=cw[i]});y+=h})}
+  y+=14;if(y+40>PH-M-30)page();font(15,false);x.fillStyle=PLC.muted;x.fillText(`Всего позиций: ${d.total}. Цены указаны в сомах.${d.st?' «В наличии» — 5 шт и более, при меньшем остатке указано точное количество.':''}`,M,y);if(d.anyNew){y+=24;x.fillStyle='#E4F5EA';x.fillRect(M,y-3,22,22);x.fillStyle=PLC.ok;x.fillRect(M,y-3,4,22);font(15,true);x.fillText('★',M+6,y);font(15,false);x.fillStyle=PLC.muted;x.fillText(`— новое поступление (за последние ${d.newDays} дн.)`,M+36,y)}
+  return pages}
+const plPdf=d=>pdfFromJpegs(capPages(()=>plPages(d)).map(c=>jpegOf(c,0.92)));
+function plXlsx(d){const X=v=>String(v??'').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const cols=[['№',6],['Наименование',d.anyNote?48:(d.war&&d.st?58:70)],...(d.anyNote?[['Примечание',28]]:[]),...(d.war?[['Гарантия',12]]:[]),...(d.st?[['Наличие',13]]:[]),['Цена, сом',15]];const n=cols.length,L='ABCDEFG',last=L[n-1];
+  const fonts=['<font><sz val="10"/><name val="Arial"/></font>'],fills=['<fill><patternFill patternType="none"/></fill>','<fill><patternFill patternType="gray125"/></fill>'],borders=['<border><left/><right/><top/><bottom/><diagonal/></border>'],xfs=['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'];const memo={};
+  const reg=(a,v)=>{let i=a.indexOf(v);if(i<0){a.push(v);i=a.length-1}return i};const hex=h=>'FF'+h.replace('#','').toUpperCase();
+  const S_=o=>{const k=JSON.stringify(o);if(memo[k]!=null)return memo[k];const f=reg(fonts,`<font>${o.b?'<b/>':''}<sz val="${o.sz||10}"/><color rgb="${hex(o.c||'#111111')}"/><name val="Arial"/></font>`);
+    const fl=o.bg?reg(fills,`<fill><patternFill patternType="solid"><fgColor rgb="${hex(o.bg)}"/><bgColor indexed="64"/></patternFill></fill>`):0;const b=o.bb?reg(borders,`<border><left/><right/><top/><bottom style="thin"><color rgb="${hex(PLC.line)}"/></bottom><diagonal/></border>`):0;
+    xfs.push(`<xf numFmtId="${o.nf||0}" fontId="${f}" fillId="${fl}" borderId="${b}" xfId="0" applyFont="1"${fl?' applyFill="1"':''}${b?' applyBorder="1"':''}${o.nf?' applyNumberFormat="1"':''} applyAlignment="1"><alignment${o.h?` horizontal="${o.h}"`:''} vertical="${o.v||'center'}"${o.w?' wrapText="1"':''}${o.ind?` indent="${o.ind}"`:''}/></xf>`);return memo[k]=xfs.length-1};
+  const rows=[],merges=[];let r=0;const cell=(i,v,st)=>{const ref=L[i]+r,s=S_(st);return v==null||v===''?`<c r="${ref}" s="${s}"/>`:typeof v==='number'?`<c r="${ref}" s="${s}"><v>${v}</v></c>`:`<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${X(v)}</t></is></c>`};
+  const add=(cs,ht)=>{r++;rows.push(`<row r="${r}"${ht?` ht="${ht}" customHeight="1"`:''}>${cs()}</row>`)};
+  const band=(v,st,ht)=>{add(()=>cols.map((_,i)=>cell(i,i?null:v,st)).join(''),ht);merges.push(`A${r}:${last}${r}`)};
+  band(d.shop||d.title,{sz:18,b:1,c:'#FFFFFF',bg:PLC.band,ind:1},34);for(const l of d.contact)band(l,{sz:10,c:'#CFE0F2',bg:PLC.band,ind:1},18);band('',{bg:PLC.band2},5);
+  add(()=>'',8);band(d.title.toUpperCase(),{sz:15,b:1,c:PLC.head},26);band(`на ${d.date}`,{sz:10,c:PLC.muted},16);if(d.note){add(()=>'',4);band('!  '+d.note,{sz:12,b:1,c:'#5A3A00',bg:'#FFF1CC',ind:1,w:1},Math.max(24,Math.ceil(d.note.length/95)*17+8))}add(()=>'',8);
+  add(()=>cols.map((t,i)=>cell(i,t[0],{b:1,c:'#FFFFFF',bg:PLC.head,h:i===1?'left':i===n-1?'right':'center',ind:i===1?1:0})).join(''),24);const hr=r;
+  if(d.kits.length){add(()=>cols.map((_,i)=>cell(i,i?null:`КОМПЛЕКТЫ   (${d.kits.length} шт.)`,{sz:11,b:1,c:'#FFFFFF',bg:'#B4600B',ind:1})).join(''),24);merges.push(`A${r}:${last}${r}`);
+    d.kits.forEach((k,j)=>{const txt=[k.name,...k.comps.map(t=>'   • '+t),...(k.note?['   '+k.note]:[]),...(k.sep>k.price?[`   По отдельности: ${NF0.format(Math.round(k.sep))} сом, выгода ${NF0.format(Math.round(k.sep-k.price))} сом`]:[])].join('\n');const lines=1+k.comps.length+(k.note?Math.ceil(k.note.length/70):0)+(k.sep>k.price?1:0);
+      add(()=>cols.map((t,i)=>{const lab=t[0];const base={bg:'#FFF6EA',bb:1};if(lab==='№')return cell(i,'К'+(j+1),{...base,b:1,c:'#B4600B',h:'center'});if(lab==='Наименование')return cell(i,txt,{...base,w:1,ind:1,v:'top'});if(lab==='Наличие')return cell(i,k.stock,{...base,b:1,h:'center',c:k.q<=0?PLC.muted:k.q<5?PLC.low:PLC.ok});if(lab==='Цена, сом')return cell(i,Math.round(k.price),{...base,b:1,sz:12,h:'right',c:'#B4600B',nf:3});return cell(i,'',base)}).join(''),lines*14+8)})}
+  for(const g of d.groups){add(()=>cols.map((_,i)=>cell(i,i?null:`${g.name.toUpperCase()}   (${g.items.length} поз.)`,{sz:11,b:1,c:'#FFFFFF',bg:PLC.band2,ind:1})).join(''),24);merges.push(`A${r}:${last}${r}`);
+    g.items.forEach((it,k)=>{const bg=it.isNew?'#E4F5EA':k%2?PLC.zebra:null;const lines=Math.max(1,Math.ceil(((it.isNew?2:0)+it.name.length)/(cols[1][1]*(it.isNew?0.85:1))),it.note?Math.ceil(it.note.length/30):1);
+      add(()=>cols.map((t,i)=>{const lab=t[0];const base={bg,bb:1};if(lab==='№')return cell(i,it.n,{...base,c:PLC.muted,h:'center'});if(lab==='Наименование')return cell(i,(it.isNew?'★ ':'')+it.name,{...base,w:1,ind:1,...(it.isNew?{b:1,c:'#0F5132'}:{})});if(lab==='Примечание')return cell(i,it.note,{...base,w:1,sz:10,c:'#8A3B12'});if(lab==='Гарантия')return cell(i,it.war,{...base,h:'center',c:it.war==='—'?PLC.muted:'#333333'});
+        if(lab==='Наличие')return cell(i,it.stock,{...base,b:1,h:'center',c:it.q<=0?PLC.muted:it.q<5?PLC.low:PLC.ok});return cell(i,Math.round(it.price),{...base,b:1,sz:10,h:'right',c:PLC.head,nf:3})}).join(''),Math.max(20,lines*14+6))})}
+  add(()=>'',8);band(`Всего позиций: ${d.total}. Цены указаны в сомах.`,{c:PLC.muted},18);if(d.st)band('«В наличии» — 5 шт и более, при меньшем остатке указано точное количество.',{c:PLC.muted},18);if(d.anyNew)band(`★ — новое поступление (за последние ${d.newDays} дн.), строка выделена зелёным`,{c:PLC.ok,b:1},18);
+  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${cols.map((t,i)=>`<col min="${i+1}" max="${i+1}" width="${t[1]}" customWidth="1"/>`).join('')}</cols><sheetData>${rows.join('')}</sheetData><mergeCells count="${merges.length}">${merges.map(m=>`<mergeCell ref="${m}"/>`).join('')}</mergeCells><pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+  const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="${fonts.length}">${fonts.join('')}</fonts><fills count="${fills.length}">${fills.join('')}</fills><borders count="${borders.length}">${borders.join('')}</borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${xfs.join('')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  return zipStore([
+    ['[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
+    ['_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ['xl/workbook.xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Прайс-лист" sheetId="1" r:id="rId1"/></sheets><definedNames><definedName name="_xlnm.Print_Titles" localSheetId="0">'Прайс-лист'!$${hr}:$${hr}</definedName></definedNames></workbook>`],
+    ['xl/_rels/workbook.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
+    ['xl/worksheets/sheet1.xml',sheet],['xl/styles.xml',styles]])}
+function plDataOpt(){const m=S.meta;const groups=[];let cur=null,n=0;
+  const rows=S.rows.slice().sort((a,b)=>a.g.localeCompare(b.g,'ru')||(m.sort==='desc'?b.p-a.p:m.sort==='name'?0:a.p-b.p)||a.n.localeCompare(b.n,'ru'));
+  const qOf=r=>r.q!=null?Number(r.q):r.t===2?9:r.t===1?1:0;
+  for(const r of rows){if(!cur||cur.name!==r.g){cur={name:r.g,items:[]};groups.push(cur)}n++;cur.items.push({n,name:r.n,note:r.nt||'',isNew:!!r.nw,war:r.w||'—',q:qOf(r),stock:r.s||'',price:r.p})}
+  const kits=(m.kits||[]).map(k=>({name:k.n,note:k.nt||'',comps:k.c||[],sep:k.sep||0,price:k.p,q:qOf(k),stock:k.s||''}));
+  const d=new Date(m.at||Date.now());const date=d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'});
+  return{kits,anyNote:groups.some(g=>g.items.some(i=>i.note)),anyNew:groups.some(g=>g.items.some(i=>i.isNew)),newDays:Number(m.newDays)||10,title:m.title||'Прайс-лист',note:m.note||'',date,shop:m.shop||'',contact:m.contact||[],war:!!m.war,st:!!m.st,groups,total:n}}
+async function plDownload(f,btn){const old=btn.textContent;btn.disabled=true;btn.textContent='Готовлю…';await new Promise(r=>setTimeout(r,30));
+  try{const d=plDataOpt();const bytes=f==='pdf'?plPdf(d):plXlsx(d);const nm=`${d.title} ${d.date}`.replace(/[\\/:*?"<>|]/g,' ')+(f==='pdf'?'.pdf':'.xlsx');
+    const blob=new Blob([bytes],{type:f==='pdf'?'application/pdf':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});const u=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=u;a.download=nm;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),60000)}
+  catch(e){console.error(e);toast('Не удалось подготовить файл')}finally{btn.disabled=false;btn.textContent=old}}
+
 /* ---------- события ---------- */
+document.addEventListener('click',e=>{const t=e.target.closest('[data-dl]');if(t)plDownload(t.dataset.dl,t)});
 document.addEventListener('click',e=>{const t=e.target.closest('[data-add],[data-q],[data-open],[data-cart],[data-close],[data-rm],[data-k],[data-out]');if(!t)return;
   if(t.dataset.add){const id=t.dataset.add;const r=id[0]==='k'?(S.meta.kits||[]).find(k=>'k'+k.k===id):S.rows.find(x=>'i'+x.i===id);if(r){setQty(id,1,r);toast('Добавлено в корзину')}return}
   if(t.dataset.q){const id=t.dataset.id;const c=inCart(id);if(c)setQty(id,c.q+Number(t.dataset.q),c);return}
