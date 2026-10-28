@@ -228,7 +228,7 @@ function main(){cartLoad();const m=S.meta;document.title=(m.shop?m.shop+' — ':
     <div id="list">${listHtml()}</div>
     <div class="foot">Цены в сомах.${m.st?' «В наличии» — 5 шт и более, при меньшем остатке указано точное количество.':''} Заказ из корзины приходит нам сразу, мы свяжемся для подтверждения.</div></main>
    <button class="btn acc fab" id="fab" data-cart="1" hidden>Корзина · <span data-cartsum></span></button>`;
-  updCart();lazy();online();
+  updCart();lazy();online();visit();
   $('#q').addEventListener('input',e=>{S.q=e.target.value;relist()});
   $('#g').addEventListener('change',e=>{S.g=e.target.value;relist();window.scrollTo({top:0})});
   $('#srt').addEventListener('change',e=>{S.sort=e.target.value;relist()});
@@ -240,6 +240,12 @@ let io=null;function lazy(){if(!('IntersectionObserver' in window)){document.que
 async function loadTh(img){const id=img.dataset.th;if(S.th[id]){img.src=S.th[id];return}try{const d=await db.doc('optthumb/'+id).get();if(d.exists&&d.data().t){S.th[id]=d.data().t;document.querySelectorAll(`img[data-th="${CSS.escape(id)}"]`).forEach(x=>x.src=S.th[id])}}catch(e){}}
 
 /* ---------- «сейчас смотрят»: отметка раз в минуту, считаем тех, кто отмечался за 2 минуты ---------- */
+/* учёт посещений (видит только владелец): один документ на браузер */
+let visited=false;function devName(){const u=navigator.userAgent;const os=/iPhone/.test(u)?'iPhone':/iPad/.test(u)?'iPad':/Android/.test(u)?'Android':/Windows/.test(u)?'Windows':/Mac OS X/.test(u)?'Mac':/Linux/.test(u)?'Linux':'Другое';
+  const br=/YaBrowser/.test(u)?'Яндекс':/Edg\//.test(u)?'Edge':/OPR\//.test(u)?'Opera':/Telegram/.test(u)?'Telegram':/Instagram/.test(u)?'Instagram':/FBAN|FBAV/.test(u)?'Facebook':/WhatsApp/.test(u)?'WhatsApp':/Chrome\//.test(u)?'Chrome':/Firefox\//.test(u)?'Firefox':/Safari\//.test(u)?'Safari':'';return (os+(br?' · '+br:'')).slice(0,60)}
+async function visit(){if(visited||!db||!S.key)return;visited=true;let id=LS.get('opt_vid',null);if(!id){id=Math.random().toString(36).slice(2)+Date.now().toString(36);LS.set('opt_vid',id)}
+  try{const FV=firebase.firestore.FieldValue;const ref=db.doc('optvisits/'+id);const me=LS.get('opt_me',{});const ex={ua:devName(),...(me.name?{nm:String(me.name).slice(0,120)}:{}),...(me.phone?{ph:String(me.phone).slice(0,40)}:{})};
+    try{await ref.update({last:FV.serverTimestamp(),n:FV.increment(1),...ex})}catch(e){await ref.set({first:FV.serverTimestamp(),last:FV.serverTimestamp(),n:1,...ex})}}catch(e){}}
 let onT=null;function online(){if(onT)return;let id=LS.get('opt_vid',null);if(!id){id=Math.random().toString(36).slice(2)+Date.now().toString(36);LS.set('opt_vid',id)}
   const FV=firebase.firestore.FieldValue,TS=firebase.firestore.Timestamp;
   const ping=()=>{if(document.visibilityState==='hidden'||!S.key)return;try{db.doc('optonline/'+id).set({t:FV.serverTimestamp()}).catch(()=>{})}catch(e){}};
@@ -285,7 +291,8 @@ async function sendOrder(e){e.preventDefault();const name=$('#on').value.trim(),
   const b=$('#ob');b.disabled=true;b.textContent='Отправляю…';S.me={name,phone,addr,rcv};LS.set('opt_me',S.me);
   try{const ref=db.collection('optorders').doc();await ref.set({at:new Date().toISOString(),key:S.key,name:name.slice(0,120),phone:phone.slice(0,40),addr:addr.slice(0,300),rcv:rcv.slice(0,40),comment:comment.slice(0,1000),items,total,st:'new'});
     const no='З-'+ref.id.slice(-5).toUpperCase();const text=`Заказ ${no} из оптового каталога\n${name}, WhatsApp ${phone}\n${addr?'Доставка: '+addr+(rcv?', принимает: '+rcv:'')+'\n':''}`+S.cart.map(x=>`• ${x.n} × ${x.q} = ${NF.format(x.p*x.q)} сом`).join('\n')+`\nИтого: ${money(total)}${comment?'\n'+comment:''}`;
-    S.sent={no,total,text};S.cart=[];cartSave();updCart();drawer()}
+    S.sent={no,total,text};S.cart=[];cartSave();updCart();drawer();
+    try{const id=LS.get('opt_vid',null);if(id)db.doc('optvisits/'+id).update({last:firebase.firestore.FieldValue.serverTimestamp(),n:firebase.firestore.FieldValue.increment(1),nm:name.slice(0,120),ph:phone.slice(0,40)}).catch(()=>{})}catch(e){}}
   catch(ex){b.disabled=false;b.textContent='Отправить заказ';err.textContent='Не удалось отправить. Проверьте интернет и попробуйте ещё раз'}}
 
 /* ---------- прайс-лист PDF / Excel — тот же вид, что в программе ---------- */
