@@ -253,11 +253,20 @@ let onT=null;function online(){if(onT)return;let id=LS.get('opt_vid',null);if(!i
   ping();setTimeout(count,1500);onT=setInterval(()=>{ping();setTimeout(count,1500)},60000);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){ping();setTimeout(count,1500)}})}
 
+/* ---------- кнопка «Назад» на телефоне ----------
+   Открытая карточка товара или корзина получают свою запись в истории браузера:
+   «Назад» закрывает их, а не уводит с сайта. */
+let hOpen=false;
+function hSync(){const any=!!(S.open||S.cartOpen);
+  if(any&&!hOpen){hOpen=true;try{history.pushState({bcOv:1},'')}catch(e){}}
+  else if(!any&&hOpen){hOpen=false;try{history.back()}catch(e){}}}
+addEventListener('popstate',()=>{if(!hOpen)return;hOpen=false;S.open=null;S.cartOpen=false;S.sent=null;modal0();drawer0()});
 /* ---------- карточка товара ---------- */
 async function openItem(pid){let r=S.rows.find(x=>String(x.i)===String(pid));
   if(!r&&String(pid).startsWith('kit_')){const k=(S.meta.kits||[]).find(x=>'kit_'+x.k===pid);if(k)r={i:pid,cid:'k'+k.k,n:k.n,g:'Комплект',p:k.p,s:k.s,t:k.t,nt:k.nt,comps:k.c||[],sep:k.sep}}if(!r)return;S.open={r,imgs:[],desc:'',k:0,loading:true};modal();
   try{const d=await db.doc('optinfo/'+pid).get();if(d.exists){const x=d.data();S.open.imgs=x.imgs||[];S.open.desc=x.desc||''}}catch(e){}if(S.open&&S.open.r===r){S.open.loading=false;modal()}}
-function modal(){let el=$('#md');const o=S.open;if(!o){el?.remove();document.body.style.overflow='';return}
+function modal(){modal0();hSync()}
+function modal0(){let el=$('#md');const o=S.open;if(!o){el?.remove();document.body.style.overflow='';return}
   if(!el){el=document.createElement('div');el.id='md';el.className='md';document.body.appendChild(el);document.body.style.overflow='hidden'}const r=o.r;const id=r.cid||'i'+r.i;
   el.innerHTML=`<div class="mdc" role="dialog" aria-modal="true" aria-label="${esc(r.n)}"><div class="gal">${o.loading?'<div class="big">Загрузка…</div>':o.imgs.length?`<div class="big"><img src="${o.imgs[o.k]}" alt="${esc(r.n)}"></div>${o.imgs.length>1?`<div class="sm">${o.imgs.map((s,i)=>`<button data-k="${i}" aria-current="${i===o.k}"><img src="${s}" alt="Фото ${i+1}"></button>`).join('')}</div>`:''}`:`<div class="big" style="color:#B9B6AE">${ICO_BOX}</div>`}</div>
    <div class="inf"><button class="x" data-close="1" aria-label="Закрыть">×</button><h3>${esc(r.n)}</h3><div class="nm"><div class="m">${r.nw?'<span class="pill new">★ новинка</span>':''}${stPill(r)}${r.w?`<span>гарантия ${esc(r.w)}</span>`:''}<span>${esc(r.g)}</span></div>${r.nt?`<div class="m"><span class="nt">${esc(r.nt)}</span></div>`:''}${r.comps?.length?`<ul class="kcomp">${r.comps.map(c=>`<li>${esc(c)}</li>`).join('')}</ul>`:''}</div>
@@ -265,7 +274,8 @@ function modal(){let el=$('#md');const o=S.open;if(!o){el?.remove();document.bod
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:auto;padding-top:8px"><div class="pr">${NF.format(r.p)} <small>сом</small>${r.sep>r.p?`<div class="sep">${NF.format(r.sep)} сом по отдельности</div>`:''}</div><div data-ctl="${esc(id)}">${ctlHtml(id)}</div></div></div></div>`}
 
 /* ---------- корзина и заказ ---------- */
-function drawer(){let el=$('#dr');if(!S.cartOpen){el?.remove();document.body.style.overflow='';return}
+function drawer(){drawer0();hSync()}
+function drawer0(){let el=$('#dr');if(!S.cartOpen){el?.remove();document.body.style.overflow='';return}
   if(!el){el=document.createElement('div');el.id='dr';el.className='ov';document.body.appendChild(el);document.body.style.overflow='hidden'}
   const sent=S.sent;const m=S.meta;const keep={n:$('#on')?.value,p:$('#op')?.value,a:$('#oa')?.value,r:$('#or')?.value,c:$('#oc')?.value};
   el.innerHTML=`<div class="drawer" role="dialog" aria-modal="true" aria-label="Корзина"><div class="dh"><h2>Корзина</h2><button class="x" data-close="1" aria-label="Закрыть">×</button></div>
